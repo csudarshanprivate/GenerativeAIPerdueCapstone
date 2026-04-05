@@ -33,6 +33,23 @@ page = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
+
+# ── Personalisation: pin favourite categories ──────────────────────────────────
+st.sidebar.markdown("**⭐ My Favourite Categories**")
+ALL_CATS = ["Technology", "Finance", "Sports", "Health", "Science", "Entertainment", "General"]
+pinned = st.sidebar.multiselect(
+    "Pin categories for My Feed:",
+    ALL_CATS,
+    default=st.session_state.pinned_categories,
+    key="pin_selector",
+)
+st.session_state.pinned_categories = pinned
+
+if st.session_state.category_clicks:
+    top = get_preferred_categories(3)
+    st.sidebar.caption(f"Most read: {', '.join(top)}")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("**How it works**")
 st.sidebar.markdown(
     "NewsGenie uses a **LangGraph ReAct agent** with `create_react_agent`. "
@@ -40,6 +57,7 @@ st.sidebar.markdown(
     "- `get_top_headlines` — category news\n"
     "- `search_news` — topic search\n"
     "- `search_web` — live web facts\n"
+    "- `get_weather` — weather forecast\n"
     "- `get_news_categories` — list categories"
 )
 
@@ -49,6 +67,23 @@ if "messages" not in st.session_state:
 if "thread_id" not in st.session_state:
     import uuid
     st.session_state.thread_id = str(uuid.uuid4())
+
+# Personalisation: track how often each category is accessed
+if "category_clicks" not in st.session_state:
+    st.session_state.category_clicks = {}   # {"Technology": 3, "Sports": 1, ...}
+if "pinned_categories" not in st.session_state:
+    st.session_state.pinned_categories = [] # user-pinned favourites
+
+def record_category_click(cat: str):
+    st.session_state.category_clicks[cat] = st.session_state.category_clicks.get(cat, 0) + 1
+
+def get_preferred_categories(n: int = 3) -> list:
+    """Return top-n categories by click count, pinned ones always first."""
+    pinned = st.session_state.pinned_categories
+    clicks = st.session_state.category_clicks
+    ranked = sorted([c for c in clicks if c not in pinned],
+                    key=lambda c: clicks[c], reverse=True)
+    return (pinned + ranked)[:n]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -126,156 +161,156 @@ if page == "💬 AI News Chat":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "📊 Quick Headlines":
     st.title("📊 Quick Headlines")
-    st.caption("Select a category and fetch the latest headlines instantly.")
+    st.caption("Select a category or view your personalised feed based on your reading preferences.")
 
     CATEGORIES = ["Technology", "Finance", "Sports", "Health", "Science", "Entertainment", "General"]
+    QUERY_MAP  = {
+        "technology":    "technology news today",
+        "finance":       "finance business news today",
+        "sports":        "sports news today",
+        "health":        "health medicine news today",
+        "science":       "science space news today",
+        "entertainment": "entertainment news today",
+        "general":       "top news headlines today",
+    }
 
-    # Persist the active category across reruns
     if "active_headline_cat" not in st.session_state:
         st.session_state.active_headline_cat = None
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        selected_cat = st.selectbox("News Category", CATEGORIES, index=0)
-    with col2:
-        st.write("")
-        st.write("")
-        if st.button(f"📰 Fetch {selected_cat} News", use_container_width=True):
-            st.session_state.active_headline_cat = selected_cat
+    # ── Shared fetch helper ────────────────────────────────────────────────────
+    def fetch_and_render(category: str, key_prefix: str = ""):
+        from tools import (
+            _normalize_category, _fetch_via_newsapi, _fetch_via_duckduckgo,
+            _filter_and_score, NEWSAPI_KEY
+        )
+        cat = _normalize_category(category)
+        raw = []
+        if NEWSAPI_KEY and len(NEWSAPI_KEY) > 20:
+            try:
+                raw = _fetch_via_newsapi(cat)
+            except Exception:
+                pass
+        if not raw:
+            raw = _fetch_via_duckduckgo(QUERY_MAP.get(cat, f"{cat} news today"))
 
-    st.markdown("---")
+        if not raw:
+            st.warning(f"Could not fetch {category} news right now.")
+            return
 
-    # Quick-access buttons with highlight on active category
-    st.markdown("**Quick Access:**")
+        all_scored = _filter_and_score(raw, remove_flagged=False)
+        kept    = [a for a in all_scored if a["reliability_score"] != 1]
+        removed = [a for a in all_scored if a["reliability_score"] == 1]
 
-    # Inject CSS to style the active button differently
-    active = st.session_state.active_headline_cat
-    highlight_css = ""
-    if active:
-        idx = CATEGORIES.index(active) if active in CATEGORIES else -1
-        if idx >= 0:
-            # Target the button by its key using Streamlit's data-testid
-            highlight_css = f"""
-            <style>
-            div[data-testid="stButton"] button[kind="secondary"] {{
-                border: 1px solid #ccc;
-            }}
-            /* Highlight active quick-access button via surrounding label trick */
-            .active-btn button {{
-                background-color: #2E86AB !important;
-                color: white !important;
-                border: 2px solid #1a5f7a !important;
-                font-weight: bold !important;
-            }}
-            </style>
-            """
-    st.markdown(highlight_css, unsafe_allow_html=True)
-
-    btn_cols = st.columns(len(CATEGORIES))
-    for i, cat in enumerate(CATEGORIES):
-        with btn_cols[i]:
-            is_active = (cat == active)
-            # Wrap active button in a div with the highlight class
-            if is_active:
-                st.markdown('<div class="active-btn">', unsafe_allow_html=True)
-            if st.button(cat, key=f"quick_{cat}", use_container_width=True,
-                         type="primary" if is_active else "secondary"):
-                st.session_state.active_headline_cat = cat
-                st.rerun()
-            if is_active:
-                st.markdown('</div>', unsafe_allow_html=True)
-
-    # Show which category is active
-    if active:
-        st.markdown(f"**Showing:** {active} News")
+        fc1, fc2, fc3 = st.columns(3)
+        fc1.metric("Total Fetched",   len(all_scored))
+        fc2.metric("✅ Passed Filter", len(kept))
+        fc3.metric("🚫 Filtered Out",  len(removed))
         st.markdown("---")
 
-        with st.spinner(f"Fetching {active} news..."):
-            try:
-                from tools import (
-                    _normalize_category, _fetch_via_newsapi, _fetch_via_duckduckgo,
-                    _filter_and_score, NEWSAPI_KEY
-                )
+        BADGE_COLOR = {2: "#2A9D8F", 0: "#888888"}
+        BADGE_BG    = {2: "#d4f5f0", 0: "#f0f0f0"}
 
-                cat = _normalize_category(active)
-                query_map = {
-                    "technology": "technology news today",
-                    "finance": "finance business news today",
-                    "sports": "sports news today",
-                    "health": "health medicine news today",
-                    "science": "science space news today",
-                    "entertainment": "entertainment news today",
-                    "general": "top news headlines today",
-                }
+        for art in kept:
+            score = art.get("reliability_score", 0)
+            label = art.get("reliability_label", "❓ Unverified Source")
+            color = BADGE_COLOR.get(score, "#888")
+            bg    = BADGE_BG.get(score,   "#f0f0f0")
+            badge_html = (
+                f'<span style="background:{bg};color:{color};padding:2px 8px;'
+                f'border-radius:12px;font-size:0.78em;font-weight:600;'
+                f'border:1px solid {color}">{label}</span>'
+            )
+            title    = art.get("title", "No title")
+            url      = art.get("url", "")
+            title_md = f"[{title}]({url})" if url else title
+            st.markdown(f"**{title_md}**")
+            st.markdown(
+                f'<small>📰 {art.get("source","Unknown")} &nbsp; {badge_html}</small>',
+                unsafe_allow_html=True
+            )
+            if art.get("description"):
+                st.caption(art["description"][:180])
+            st.markdown("---")
 
-                # Fetch raw articles
-                raw_articles = []
-                if NEWSAPI_KEY and len(NEWSAPI_KEY) > 20:
-                    try:
-                        raw_articles = _fetch_via_newsapi(cat)
-                    except Exception:
-                        pass
-                if not raw_articles:
-                    raw_articles = _fetch_via_duckduckgo(query_map.get(cat, f"{cat} news today"))
-
-                if not raw_articles:
-                    st.warning("Could not fetch news. Please try again.")
-                else:
-                    # Run reliability filter — get ALL scored articles (remove_flagged=False)
-                    # so we can show what was filtered
-                    all_scored = _filter_and_score(raw_articles, remove_flagged=False)
-                    kept    = [a for a in all_scored if a["reliability_score"] != 1]
-                    removed = [a for a in all_scored if a["reliability_score"] == 1]
-
-                    # ── Filter summary bar ────────────────────────────────────
-                    fcol1, fcol2, fcol3 = st.columns(3)
-                    fcol1.metric("Total Fetched",  len(all_scored))
-                    fcol2.metric("✅ Passed Filter", len(kept))
-                    fcol3.metric("🚫 Filtered Out",  len(removed))
+        if removed:
+            with st.expander(f"🚫 {len(removed)} article(s) filtered out — click to see why"):
+                for art in removed:
+                    st.markdown(
+                        f"**{art.get('title','No title')}**  \n"
+                        f"Source: `{art.get('source','?')}`  \n"
+                        f"Reason: {art.get('reliability_label','⚠️ Flagged')}"
+                    )
                     st.markdown("---")
 
-                    # ── Render kept articles with colour-coded badges ─────────
-                    BADGE_COLOR = {2: "#2A9D8F", 0: "#888888", 1: "#E76F51"}
-                    BADGE_BG    = {2: "#d4f5f0", 0: "#f0f0f0", 1: "#fde8e4"}
+    # ── Tabs: My Feed | Browse ─────────────────────────────────────────────────
+    tab_feed, tab_browse = st.tabs(["⭐ My Feed", "📂 Browse Categories"])
 
-                    for art in kept:
-                        score = art.get("reliability_score", 0)
-                        label = art.get("reliability_label", "❓ Unverified Source")
-                        color = BADGE_COLOR.get(score, "#888")
-                        bg    = BADGE_BG.get(score, "#f0f0f0")
+    # ── TAB 1: My Feed ─────────────────────────────────────────────────────────
+    with tab_feed:
+        preferred = get_preferred_categories(3)
+        pinned    = st.session_state.pinned_categories
 
-                        badge_html = (
-                            f'<span style="background:{bg};color:{color};'
-                            f'padding:2px 8px;border-radius:12px;font-size:0.78em;'
-                            f'font-weight:600;border:1px solid {color}">{label}</span>'
-                        )
+        if not preferred:
+            st.info(
+                "Your personalised feed is empty. "
+                "Browse categories below to build your preferences, "
+                "or pin favourites in the sidebar."
+            )
+        else:
+            feed_label = "Based on your pinned categories and reading history"
+            if pinned:
+                feed_label = f"Pinned: {', '.join(pinned)}"
+                if len(preferred) > len(pinned):
+                    extra = [c for c in preferred if c not in pinned]
+                    feed_label += f"  |  Also reading: {', '.join(extra)}"
+            st.caption(feed_label)
 
-                        with st.container():
-                            title = art.get("title", "No title")
-                            url   = art.get("url", "")
-                            title_md = f"[{title}]({url})" if url else title
-                            st.markdown(f"**{title_md}**")
-                            st.markdown(
-                                f'<small>📰 {art.get("source","Unknown")} &nbsp; {badge_html}</small>',
-                                unsafe_allow_html=True
-                            )
-                            if art.get("description"):
-                                st.caption(art["description"][:180])
-                            st.markdown("---")
+            for cat in preferred:
+                st.subheader(f"📰 {cat}")
+                with st.spinner(f"Loading {cat}..."):
+                    try:
+                        fetch_and_render(cat, key_prefix=f"feed_{cat}")
+                    except Exception as e:
+                        st.error(str(e))
 
-                    # ── Show filtered-out articles in expander ────────────────
-                    if removed:
-                        with st.expander(f"🚫 {len(removed)} article(s) filtered out — click to see why"):
-                            for art in removed:
-                                st.markdown(
-                                    f"**{art.get('title','No title')}**  \n"
-                                    f"Source: `{art.get('source','?')}`  \n"
-                                    f"Reason: {art.get('reliability_label','⚠️ Flagged')}"
-                                )
-                                st.markdown("---")
+    # ── TAB 2: Browse Categories ───────────────────────────────────────────────
+    with tab_browse:
+        # Inject CSS for active button highlight
+        active = st.session_state.active_headline_cat
+        st.markdown("""
+        <style>
+        .active-btn button {
+            background-color: #2E86AB !important;
+            color: white !important;
+            border: 2px solid #1a5f7a !important;
+            font-weight: bold !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
-            except Exception as e:
-                st.error(f"Error fetching news: {str(e)}")
+        st.markdown("**Quick Access:**")
+        btn_cols = st.columns(len(CATEGORIES))
+        for i, cat in enumerate(CATEGORIES):
+            with btn_cols[i]:
+                is_active = (cat == active)
+                if is_active:
+                    st.markdown('<div class="active-btn">', unsafe_allow_html=True)
+                if st.button(cat, key=f"quick_{cat}", use_container_width=True,
+                             type="primary" if is_active else "secondary"):
+                    st.session_state.active_headline_cat = cat
+                    record_category_click(cat)   # ← track for personalisation
+                    st.rerun()
+                if is_active:
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+        if active:
+            st.markdown(f"**Showing:** {active} News")
+            st.markdown("---")
+            with st.spinner(f"Fetching {active} news..."):
+                try:
+                    fetch_and_render(active, key_prefix="browse")
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

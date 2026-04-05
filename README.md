@@ -15,6 +15,8 @@ NewsGenie is a truly **agentic** AI news and information assistant built with **
 - 🌤️ **Weather forecasts** — current conditions and 3-day forecasts for any city worldwide
 - 💬 **Conversational AI** — answers general knowledge questions directly from LLM training
 - 🧠 **Multi-turn memory** — remembers context across the full conversation via `MemorySaver`
+- 🛡️ **Content reliability filter** — scores and filters unreliable or misleading articles before display
+- ⭐ **Personalised news feed** — learns reading preferences from usage history; supports pinned favourite categories
 
 ---
 
@@ -35,6 +37,12 @@ create_react_agent  (LangGraph ReAct Loop)
     │       ├── get_weather(location)          ← weather forecast
     │       └── get_news_categories()          ← list categories
     │
+    ├── Reliability Filter  ←── applied to every article before display
+    │       ├── Trusted sources  → ✅ green badge
+    │       ├── Unverified       → ❓ grey badge
+    │       ├── Clickbait titles → ⚠️ filtered out
+    │       └── Flagged domains  → 🚫 removed entirely
+    │
     ├── Tool Results  ──► LLM Synthesises Final Answer
     │
     └── MemorySaver  ←── persists conversation across turns
@@ -50,7 +58,7 @@ The LLM reads each tool's docstring and autonomously decides which tool(s) to ca
 ```
 AgenticsNewsGenie/
 ├── AgenticsNewsGenie_Capstone.ipynb  # Main notebook — all steps, demos, test cases
-├── tools.py                          # @tool-decorated agent tools (5 tools)
+├── tools.py                          # @tool-decorated agent tools + reliability filter
 ├── agents.py                         # create_react_agent setup + system prompt
 ├── workflow.py                       # run_agent() helper + MemorySaver
 ├── streamlit_app.py                  # Streamlit UI — 3 pages
@@ -101,7 +109,7 @@ Run cells top to bottom.
 |---|---|
 | Setup | Load `.env`, install imports |
 | Step 1 | Environment setup and library imports |
-| Step 2 | Define 5 `@tool`-decorated agent tools |
+| Step 2 | Define 5 `@tool`-decorated agent tools with reliability filter |
 | Step 3 | Create ReAct agent with `create_react_agent` + `MemorySaver` |
 | Step 4 | 7 sample scenarios (tech news, finance, topic search, CEO lookup, chat, multi-turn, categories) |
 | Step 5 | 10 automated test cases — tool selection + response validation |
@@ -116,7 +124,7 @@ Open **http://localhost:8501**
 | Page | Description |
 |---|---|
 | 💬 AI News Chat | Main chat interface — agent shows which tools it called per response |
-| 📊 Quick Headlines | One-click category buttons with active highlight + instant news fetch |
+| 📊 Quick Headlines | Two tabs: **⭐ My Feed** (personalised) + **📂 Browse Categories** (with active highlight + reliability filter) |
 | 🧪 Test Cases | Run 10 automated tests with colour-coded pass/fail results |
 
 ---
@@ -147,22 +155,46 @@ Open **http://localhost:8501**
 
 ---
 
+## Personalised News Feed
+
+NewsGenie addresses the CEP requirement *"Access personalised news feeds alongside general information quickly"* through a preference-learning system built into the Quick Headlines page.
+
+**How personalisation works:**
+
+1. **Usage tracking** — every category the user clicks in Browse is recorded in session state with a click count
+2. **Ranked feed** — the **⭐ My Feed** tab automatically shows the top 3 most-read categories, fetching fresh headlines for each
+3. **Pinned favourites** — the sidebar lets users explicitly pin preferred categories; pinned ones always appear first in My Feed
+4. **Progressive** — the feed starts empty and grows as the user explores, showing "Build your feed by browsing categories below" until preferences exist
+
+| My Feed state | What is shown |
+|---|---|
+| No history, no pins | Prompt to browse categories or pin favourites |
+| Pins set in sidebar | Pinned categories' headlines shown immediately |
+| Usage history exists | Top 3 most-read categories auto-loaded |
+| Pins + history | Pins first, then most-read categories to fill remaining slots |
+
+---
+
 ## Content Reliability Filter
 
 A key requirement of NewsGenie is filtering out unreliable or misleading content. Every article passes through a reliability scoring layer before being shown to the user.
 
-| Score | Badge | Criteria |
+| Badge | Meaning | Action |
 |---|---|---|
-| Trusted | ✅ Trusted Source | Article from a known reputable outlet (Reuters, BBC, Bloomberg, ESPN, etc.) |
-| Unverified | ❓ Unverified Source | Source not in trusted list — shown but flagged |
-| Flagged | ⚠️ Possible Clickbait | Sensational title patterns detected (e.g. "You won't believe…", "!!!") |
-| Removed | *(filtered out)* | Known misinformation sources (e.g. InfoWars) — dropped entirely |
+| ✅ Trusted Source | Major established outlet (Reuters, BBC, Bloomberg, ESPN, NYT, etc.) | Shown with green badge |
+| ❓ Unverified Source | Source not in trusted list | Shown with grey badge |
+| ⚠️ Possible Clickbait | Sensational title detected ("You won't believe…", "!!!", "10 secrets…") | Filtered out |
+| 🚫 Flagged Domain | Known misinformation site (InfoWars, NaturalNews, etc.) | Removed entirely |
 
 **How it works:**
-1. Each article's source is matched against a curated trusted-sources list (50+ major outlets)
-2. Article titles are checked against clickbait regex patterns (sensational language, excessive punctuation, listicle bait)
-3. Known unreliable domains are removed before results reach the user
-4. All remaining articles display a reliability badge alongside the source name
+1. Each article's source is matched against a curated list of 50+ trusted outlets
+2. Article titles are scanned with regex patterns to detect sensational/clickbait language
+3. Known unreliable domains are blocked before results reach the user
+4. Remaining articles are annotated with a reliability badge
+
+**Where it is visible:**
+- **Quick Headlines page** — shows a metric bar (Total Fetched / Passed Filter / Filtered Out), colour-coded badges on each article, and a collapsible expander listing removed articles with the reason
+- **AI Chat** — filtering runs silently; flagged articles are never included in the agent's response
 
 ---
 
@@ -171,9 +203,9 @@ A key requirement of NewsGenie is filtering out unreliable or misleading content
 | Scenario | Behaviour |
 |---|---|
 | No `NEWSAPI_KEY` | Automatically uses DuckDuckGo News |
-| DuckDuckGo rate-limited | Retries 3 times with backoff |
+| DuckDuckGo rate-limited | Retries 3 times with exponential backoff |
 | General knowledge question | LLM answers from training data (no tool needed) |
-| Ambiguous city name | Geocoding picks best match by state/country hint |
+| Ambiguous city name (e.g. "Aurora") | Geocoding fetches top 10 results, picks best match by state/country hint |
 | All results flagged as unreliable | Returns informative message, prompts retry |
 
 ---
@@ -200,7 +232,7 @@ See **`test_cases.md`** for full details. Summary:
 | `langgraph` | `create_react_agent` — ReAct agentic loop with `MemorySaver` |
 | `langchain-openai` | GPT-4o-mini LLM for reasoning and synthesis |
 | `langchain-core` | `@tool` decorator for defining agent tools |
-| `ddgs` | DuckDuckGo news and web search (no API key) |
+| `ddgs` | DuckDuckGo news and web search (no API key needed) |
 | `requests` | NewsAPI and Open-Meteo HTTP calls |
 | `streamlit` | Interactive multi-page web UI |
 | `python-dotenv` | API key management via `.env` |
@@ -213,14 +245,15 @@ See **`test_cases.md`** for full details. Summary:
 | Requirement | Implementation |
 |---|---|
 | Agentic AI with tool use | `create_react_agent` — LLM autonomously selects and calls tools |
-| Real-time news API integration | NewsAPI.org + DuckDuckGo fallback |
+| Real-time news API integration | NewsAPI.org + DuckDuckGo News fallback |
 | Technology, finance, sports, health, science categories | All 7 categories supported |
 | Web search tool | `search_web` tool via DuckDuckGo |
-| Weather integration | `get_weather` tool via Open-Meteo (no key needed) |
-| Multi-turn conversation memory | `MemorySaver` checkpointer across all turns |
+| Weather integration | `get_weather` tool via Open-Meteo (no API key needed) |
+| Filter unreliable/misleading content | Reliability filter — trusted-source list + clickbait regex + flagged-domain removal; visually shown in Quick Headlines with metric bar and colour-coded badges |
+| Access personalised news feeds | ⭐ My Feed tab — usage-tracked preferences + sidebar pinning; top categories auto-loaded |
+| Multi-turn conversation memory | `MemorySaver` checkpointer — context preserved across all turns |
 | LangGraph-based workflow | `create_react_agent` built on LangGraph internals |
-| Fallback mechanisms | DuckDuckGo fallback + rate-limit retry + direct LLM fallback |
+| Fallback mechanisms | DuckDuckGo fallback + 3x retry with backoff + direct LLM fallback |
 | Streamlit UI with session management | 3-page app with persistent session state |
-| Filter unreliable/misleading content | Reliability filter — trusted-source list + clickbait detection + flagged-domain removal |
 | Automated test cases | 10 tests validating tool selection and response quality |
 | Multi-file architecture | `tools.py` → `agents.py` → `workflow.py` → `streamlit_app.py` |
