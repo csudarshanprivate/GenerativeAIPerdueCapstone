@@ -1,17 +1,47 @@
-# NewsGenie — AI-Powered Information and News Assistant
+# NewsGenie — Agentic AI News & Information Assistant
 **Course End Project (CEP) — Applied Generative AI Specialisation**
 
 ---
 
 ## Overview
 
-NewsGenie is a unified agentic AI platform that helps users navigate today's fast-paced digital news landscape by:
+NewsGenie is a truly **agentic** AI news and information assistant built with **LangGraph `create_react_agent`**. Unlike a traditional rule-based pipeline, the LLM autonomously decides which tools to invoke and in what order — a classic **ReAct (Reasoning + Acting)** loop.
 
-- 💬 **Handling conversations** — interprets general queries and answers via GPT-4o-mini
-- 📰 **Fetching real-time news** — curates top headlines by category (Technology, Finance, Sports, Health, Science, General)
-- 🔍 **Performing web searches** — enriches responses with live external information via DuckDuckGo
-- 🔀 **Routing intelligently** — LangGraph `StateGraph` classifies every query and dispatches to the right handler
-- 🛡️ **Handling failures gracefully** — automatic fallback from NewsAPI → DuckDuckGo → LLM
+**Core capabilities:**
+
+- 📰 **Real-time news headlines** — fetches top stories by category (Technology, Finance, Sports, Health, Science, Entertainment, General)
+- 🔍 **Topic news search** — finds recent articles on any specific subject or event
+- 🌐 **Live web search** — retrieves real-time facts, prices, and current information
+- 🌤️ **Weather forecasts** — current conditions and 3-day forecasts for any city worldwide
+- 💬 **Conversational AI** — answers general knowledge questions directly from LLM training
+- 🧠 **Multi-turn memory** — remembers context across the full conversation via `MemorySaver`
+
+---
+
+## Agentic Architecture
+
+```
+User Query
+    │
+    ▼
+create_react_agent  (LangGraph ReAct Loop)
+    │
+    ├── LLM Reasoning  ←── decides which tool(s) to call
+    │
+    ├── Tool Execution
+    │       ├── get_top_headlines(category)   ← news by category
+    │       ├── search_news(query)             ← topic news search
+    │       ├── search_web(query)              ← live web facts
+    │       ├── get_weather(location)          ← weather forecast
+    │       └── get_news_categories()          ← list categories
+    │
+    ├── Tool Results  ──► LLM Synthesises Final Answer
+    │
+    └── MemorySaver  ←── persists conversation across turns
+```
+
+**What makes it agentic:**
+The LLM reads each tool's docstring and autonomously decides which tool(s) to call, what arguments to pass, and how to synthesise results — with no hard-coded routing logic.
 
 ---
 
@@ -19,13 +49,16 @@ NewsGenie is a unified agentic AI platform that helps users navigate today's fas
 
 ```
 AgenticsNewsGenie/
-├── AgenticsNewsGenie_Capstone.ipynb  # Main notebook — all steps + test cases
-├── streamlit_app.py                  # Interactive Streamlit UI (3 pages)
+├── AgenticsNewsGenie_Capstone.ipynb  # Main notebook — all steps, demos, test cases
+├── tools.py                          # @tool-decorated agent tools (5 tools)
+├── agents.py                         # create_react_agent setup + system prompt
+├── workflow.py                       # run_agent() helper + MemorySaver
+├── streamlit_app.py                  # Streamlit UI — 3 pages
 ├── requirements.txt                  # Python dependencies
 ├── .env                              # API keys (fill before running)
-├── test_cases.md                     # 30+ detailed test cases
+├── test_cases.md                     # 30 detailed test cases
 ├── README.md                         # This file
-└── README.docx                       # Word version of README
+└── README.docx                       # Word version of this README
 ```
 
 ---
@@ -33,8 +66,9 @@ AgenticsNewsGenie/
 ## Prerequisites
 
 - Python **3.9+**
-- **OpenAI API key** (required)
-- **NewsAPI key** (optional — free tier at [newsapi.org](https://newsapi.org). DuckDuckGo is used automatically if not set)
+- **OpenAI API key** (required) — used for the ReAct agent LLM
+- **NewsAPI key** (optional — free tier at [newsapi.org](https://newsapi.org); DuckDuckGo used automatically if not set)
+- No key required for weather (Open-Meteo) or web search (DuckDuckGo)
 
 ---
 
@@ -65,15 +99,13 @@ Run cells top to bottom.
 
 | Step | Description |
 |---|---|
-| Setup | Load `.env`, import all libraries |
-| Step 1 | Define `NewsGenieState` + Router node (LLM-powered query classification) |
-| Step 2 | News Fetching node — NewsAPI (primary) + DuckDuckGo (fallback) |
-| Step 3 | Web Search node — DuckDuckGo text search + LLM synthesis |
-| Step 4 | Chat node — GPT-4o-mini with conversation history |
-| Step 5 | Build and compile full LangGraph `StateGraph` workflow |
-| Step 6 | 6 sample scenarios (tech news, finance, sports, chat, search, multi-turn) |
-| Step 7 | 10 automated test cases — routing + response validation |
-| Step 8 | 3 visualisations (test results, category distribution, workflow diagram) |
+| Setup | Load `.env`, install imports |
+| Step 1 | Environment setup and library imports |
+| Step 2 | Define 5 `@tool`-decorated agent tools |
+| Step 3 | Create ReAct agent with `create_react_agent` + `MemorySaver` |
+| Step 4 | 7 sample scenarios (tech news, finance, topic search, CEO lookup, chat, multi-turn, categories) |
+| Step 5 | 10 automated test cases — tool selection + response validation |
+| Step 6 | 2 visualisations (test results + agent architecture diagram) |
 
 ### Option B — Streamlit UI
 ```bash
@@ -83,56 +115,46 @@ Open **http://localhost:8501**
 
 | Page | Description |
 |---|---|
-| 💬 Chat & News | Main chat interface with route badge, article expander, quick buttons |
-| 📊 Dashboard | LangGraph workflow diagram + category overview + session metrics |
-| 🧪 Test Cases | Run all 10 automated tests with colour-coded pass/fail table |
+| 💬 AI News Chat | Main chat interface — agent shows which tools it called per response |
+| 📊 Quick Headlines | One-click category buttons with active highlight + instant news fetch |
+| 🧪 Test Cases | Run 10 automated tests with colour-coded pass/fail results |
 
 ---
 
-## Architecture
+## Tools
 
-```
-User Query
-    │
-    ▼
-┌──────────────────────────────────────┐
-│         LangGraph StateGraph         │
-│                                      │
-│  [Router Node] ← LLM intent detect  │
-│       │                              │
-│  ┌────┴────────────────┐             │
-│  │         │           │             │
-│ [News]  [Search]    [Chat]           │
-│  │         │           │             │
-│  └────┬────┴───────────┘             │
-│       │                              │
-│  [Formatter Node] ← assemble output │
-│       │                              │
-│  [MemorySaver] ← session memory     │
-└──────────────────────────────────────┘
-    │
-    ▼
-Final Response to User
-```
-
-### Query Routing Logic
-
-| Query Example | Classified As | Handler |
+| Tool | Trigger | Data Source |
 |---|---|---|
-| "Latest tech news today" | `news` → technology | News Node |
-| "Top finance headlines" | `news` → finance | News Node |
-| "What is machine learning?" | `chat` → general | Chat Node |
-| "Current Bitcoin price?" | `search` → finance | Search Node |
-| "Summarise what you told me" | `chat` → general | Chat Node (with memory) |
+| `get_top_headlines(category)` | "latest tech news", "top sports headlines" | NewsAPI / DuckDuckGo News |
+| `search_news(query)` | "news about Tesla", "OpenAI recent news" | NewsAPI / DuckDuckGo News |
+| `search_web(query)` | "who is CEO of Apple", "Bitcoin price" | DuckDuckGo Web Search |
+| `get_weather(location)` | "weather in London", "will it rain in Chicago?" | Open-Meteo (free, no key) |
+| `get_news_categories()` | "what categories do you support?" | Built-in |
 
-### Fallback Mechanisms
+---
 
-| Failure | Fallback |
+## Query Examples
+
+| User Query | Tool Called | Result |
+|---|---|---|
+| "Latest technology news today" | `get_top_headlines("technology")` | Top tech headlines |
+| "Top sports headlines" | `get_top_headlines("sports")` | Sports stories |
+| "Search for news about OpenAI" | `search_news("OpenAI recent news")` | OpenAI articles |
+| "Who is the CEO of Microsoft?" | `search_web("CEO of Microsoft")` | Satya Nadella |
+| "Weather in Aurora, Illinois" | `get_weather("Aurora, Illinois")` | Current + 3-day forecast |
+| "What is machine learning?" | *(no tool — LLM answers directly)* | Explanation |
+| "Which story was most important?" | *(no tool — uses conversation memory)* | Follow-up answer |
+
+---
+
+## Fallback Mechanisms
+
+| Scenario | Behaviour |
 |---|---|
-| NewsAPI unavailable / no key | DuckDuckGo News |
-| DuckDuckGo news empty | Error message with retry suggestion |
-| DuckDuckGo search fails | LLM answers from training knowledge |
-| JSON parse error in router | Defaults to `chat` type |
+| No `NEWSAPI_KEY` | Automatically uses DuckDuckGo News |
+| DuckDuckGo rate-limited | Retries 3 times with backoff |
+| General knowledge question | LLM answers from training data (no tool needed) |
+| Ambiguous city name | Geocoding picks best match by state/country hint |
 
 ---
 
@@ -140,15 +162,12 @@ Final Response to User
 
 See **`test_cases.md`** for full details. Summary:
 
-| Category | Count |
+| Category | Test IDs |
 |---|---|
-| TC-01 to TC-04 | News routing — technology, finance, sports, health |
-| TC-05 to TC-07 | Chat routing — general queries, explanations |
-| TC-08 to TC-09 | Web search routing — live data queries |
-| TC-10 to TC-15 | Fallback & error handling |
-| TC-16 to TC-20 | Multi-turn memory validation |
-| TC-21 to TC-25 | Edge cases — empty queries, ambiguous input |
-| TC-26 to TC-30 | Streamlit UI interaction tests |
+| News routing (technology, finance, sports, health) | TC-01 to TC-04 |
+| Web search routing (factual queries) | TC-05 to TC-07 |
+| General chat (LLM answers without tools) | TC-08 to TC-09 |
+| Multi-turn memory | TC-10 |
 
 **Pass criteria:** ≥ 80% PASS across all test cases.
 
@@ -158,12 +177,13 @@ See **`test_cases.md`** for full details. Summary:
 
 | Library | Purpose |
 |---|---|
-| `langgraph` | `StateGraph` workflow — nodes, conditional routing, memory |
-| `langchain-openai` | GPT-4o-mini LLM for routing, chat, and synthesis |
-| `duckduckgo-search` | No-key news and web search fallback |
-| `newsapi-python` | Real-time news headlines by category |
-| `streamlit` | Interactive web UI |
-| `python-dotenv` | API key management |
+| `langgraph` | `create_react_agent` — ReAct agentic loop with `MemorySaver` |
+| `langchain-openai` | GPT-4o-mini LLM for reasoning and synthesis |
+| `langchain-core` | `@tool` decorator for defining agent tools |
+| `ddgs` | DuckDuckGo news and web search (no API key) |
+| `requests` | NewsAPI and Open-Meteo HTTP calls |
+| `streamlit` | Interactive multi-page web UI |
+| `python-dotenv` | API key management via `.env` |
 | `python-docx` | README Word document generation |
 
 ---
@@ -172,13 +192,14 @@ See **`test_cases.md`** for full details. Summary:
 
 | Requirement | Implementation |
 |---|---|
-| AI chatbot — conversation management | GPT-4o-mini Chat Node with `MemorySaver` history |
-| Query differentiation | LangGraph Router Node — `news` / `search` / `chat` |
+| Agentic AI with tool use | `create_react_agent` — LLM autonomously selects and calls tools |
 | Real-time news API integration | NewsAPI.org + DuckDuckGo fallback |
-| Technology, finance, sports categories | All 6 categories supported |
-| Web search tool | DuckDuckGo text search + LLM synthesis |
-| LangGraph-based workflow | Full `StateGraph` with 5 nodes |
-| Fallback mechanisms | 3-tier fallback chain for each failure mode |
-| Streamlit UI with session management | 3-page Streamlit app with `MemorySaver` |
-| Error handling | Missing keys, failed APIs, empty results |
-| Workflow and error handling documentation | `test_cases.md` + notebook Step 7 |
+| Technology, finance, sports, health, science categories | All 7 categories supported |
+| Web search tool | `search_web` tool via DuckDuckGo |
+| Weather integration | `get_weather` tool via Open-Meteo (no key needed) |
+| Multi-turn conversation memory | `MemorySaver` checkpointer across all turns |
+| LangGraph-based workflow | `create_react_agent` built on LangGraph internals |
+| Fallback mechanisms | DuckDuckGo fallback + rate-limit retry + direct LLM fallback |
+| Streamlit UI with session management | 3-page app with persistent session state |
+| Automated test cases | 10 tests validating tool selection and response quality |
+| Multi-file architecture | `tools.py` → `agents.py` → `workflow.py` → `streamlit_app.py` |
