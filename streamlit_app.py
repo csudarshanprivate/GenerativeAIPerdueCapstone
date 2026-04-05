@@ -189,17 +189,91 @@ elif page == "📊 Quick Headlines":
     if active:
         st.markdown(f"**Showing:** {active} News")
         st.markdown("---")
+
         with st.spinner(f"Fetching {active} news..."):
             try:
-                from workflow import run_agent
-                import uuid
-                result = run_agent(
-                    f"Get the top {active.lower()} headlines",
-                    thread_id=f"headlines-{uuid.uuid4()}",
+                from tools import (
+                    _normalize_category, _fetch_via_newsapi, _fetch_via_duckduckgo,
+                    _filter_and_score, NEWSAPI_KEY
                 )
-                st.markdown(result["response"])
-                if result["tools_used"]:
-                    st.success(f"Agent used: `{'`, `'.join(result['tools_used'])}`")
+
+                cat = _normalize_category(active)
+                query_map = {
+                    "technology": "technology news today",
+                    "finance": "finance business news today",
+                    "sports": "sports news today",
+                    "health": "health medicine news today",
+                    "science": "science space news today",
+                    "entertainment": "entertainment news today",
+                    "general": "top news headlines today",
+                }
+
+                # Fetch raw articles
+                raw_articles = []
+                if NEWSAPI_KEY and len(NEWSAPI_KEY) > 20:
+                    try:
+                        raw_articles = _fetch_via_newsapi(cat)
+                    except Exception:
+                        pass
+                if not raw_articles:
+                    raw_articles = _fetch_via_duckduckgo(query_map.get(cat, f"{cat} news today"))
+
+                if not raw_articles:
+                    st.warning("Could not fetch news. Please try again.")
+                else:
+                    # Run reliability filter — get ALL scored articles (remove_flagged=False)
+                    # so we can show what was filtered
+                    all_scored = _filter_and_score(raw_articles, remove_flagged=False)
+                    kept    = [a for a in all_scored if a["reliability_score"] != 1]
+                    removed = [a for a in all_scored if a["reliability_score"] == 1]
+
+                    # ── Filter summary bar ────────────────────────────────────
+                    fcol1, fcol2, fcol3 = st.columns(3)
+                    fcol1.metric("Total Fetched",  len(all_scored))
+                    fcol2.metric("✅ Passed Filter", len(kept))
+                    fcol3.metric("🚫 Filtered Out",  len(removed))
+                    st.markdown("---")
+
+                    # ── Render kept articles with colour-coded badges ─────────
+                    BADGE_COLOR = {2: "#2A9D8F", 0: "#888888", 1: "#E76F51"}
+                    BADGE_BG    = {2: "#d4f5f0", 0: "#f0f0f0", 1: "#fde8e4"}
+
+                    for art in kept:
+                        score = art.get("reliability_score", 0)
+                        label = art.get("reliability_label", "❓ Unverified Source")
+                        color = BADGE_COLOR.get(score, "#888")
+                        bg    = BADGE_BG.get(score, "#f0f0f0")
+
+                        badge_html = (
+                            f'<span style="background:{bg};color:{color};'
+                            f'padding:2px 8px;border-radius:12px;font-size:0.78em;'
+                            f'font-weight:600;border:1px solid {color}">{label}</span>'
+                        )
+
+                        with st.container():
+                            title = art.get("title", "No title")
+                            url   = art.get("url", "")
+                            title_md = f"[{title}]({url})" if url else title
+                            st.markdown(f"**{title_md}**")
+                            st.markdown(
+                                f'<small>📰 {art.get("source","Unknown")} &nbsp; {badge_html}</small>',
+                                unsafe_allow_html=True
+                            )
+                            if art.get("description"):
+                                st.caption(art["description"][:180])
+                            st.markdown("---")
+
+                    # ── Show filtered-out articles in expander ────────────────
+                    if removed:
+                        with st.expander(f"🚫 {len(removed)} article(s) filtered out — click to see why"):
+                            for art in removed:
+                                st.markdown(
+                                    f"**{art.get('title','No title')}**  \n"
+                                    f"Source: `{art.get('source','?')}`  \n"
+                                    f"Reason: {art.get('reliability_label','⚠️ Flagged')}"
+                                )
+                                st.markdown("---")
+
             except Exception as e:
                 st.error(f"Error fetching news: {str(e)}")
 
