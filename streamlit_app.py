@@ -130,34 +130,71 @@ elif page == "📊 Quick Headlines":
 
     CATEGORIES = ["Technology", "Finance", "Sports", "Health", "Science", "Entertainment", "General"]
 
+    # Persist the active category across reruns
+    if "active_headline_cat" not in st.session_state:
+        st.session_state.active_headline_cat = None
+
     col1, col2 = st.columns([2, 1])
     with col1:
         selected_cat = st.selectbox("News Category", CATEGORIES, index=0)
     with col2:
         st.write("")
         st.write("")
-        fetch_btn = st.button(f"📰 Fetch {selected_cat} News", use_container_width=True)
+        if st.button(f"📰 Fetch {selected_cat} News", use_container_width=True):
+            st.session_state.active_headline_cat = selected_cat
 
     st.markdown("---")
 
-    # Quick-access buttons
+    # Quick-access buttons with highlight on active category
     st.markdown("**Quick Access:**")
+
+    # Inject CSS to style the active button differently
+    active = st.session_state.active_headline_cat
+    highlight_css = ""
+    if active:
+        idx = CATEGORIES.index(active) if active in CATEGORIES else -1
+        if idx >= 0:
+            # Target the button by its key using Streamlit's data-testid
+            highlight_css = f"""
+            <style>
+            div[data-testid="stButton"] button[kind="secondary"] {{
+                border: 1px solid #ccc;
+            }}
+            /* Highlight active quick-access button via surrounding label trick */
+            .active-btn button {{
+                background-color: #2E86AB !important;
+                color: white !important;
+                border: 2px solid #1a5f7a !important;
+                font-weight: bold !important;
+            }}
+            </style>
+            """
+    st.markdown(highlight_css, unsafe_allow_html=True)
+
     btn_cols = st.columns(len(CATEGORIES))
-    clicked_cat = None
     for i, cat in enumerate(CATEGORIES):
         with btn_cols[i]:
-            if st.button(cat, key=f"quick_{cat}", use_container_width=True):
-                clicked_cat = cat
+            is_active = (cat == active)
+            # Wrap active button in a div with the highlight class
+            if is_active:
+                st.markdown('<div class="active-btn">', unsafe_allow_html=True)
+            if st.button(cat, key=f"quick_{cat}", use_container_width=True,
+                         type="primary" if is_active else "secondary"):
+                st.session_state.active_headline_cat = cat
+                st.rerun()
+            if is_active:
+                st.markdown('</div>', unsafe_allow_html=True)
 
-    active_cat = clicked_cat if clicked_cat else (selected_cat if fetch_btn else None)
-
-    if active_cat:
-        with st.spinner(f"Fetching {active_cat} news..."):
+    # Show which category is active
+    if active:
+        st.markdown(f"**Showing:** {active} News")
+        st.markdown("---")
+        with st.spinner(f"Fetching {active} news..."):
             try:
                 from workflow import run_agent
                 import uuid
                 result = run_agent(
-                    f"Get the top {active_cat.lower()} headlines",
+                    f"Get the top {active.lower()} headlines",
                     thread_id=f"headlines-{uuid.uuid4()}",
                 )
                 st.markdown(result["response"])
