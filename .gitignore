@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.png
+create_notebook.py
+generate_word_doc.py
