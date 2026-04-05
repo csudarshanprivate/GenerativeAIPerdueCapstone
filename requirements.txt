@@ -3,6 +3,7 @@ langchain>=0.3.0
 langchain-openai>=0.3.0
 langchain-core>=0.3.0
 langgraph>=0.6.0
+ddgs>=0.1.0
 duckduckgo-search>=6.0.0
 newsapi-python>=0.2.7
 streamlit>=1.35.0

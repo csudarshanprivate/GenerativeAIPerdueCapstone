@@ -4,7 +4,7 @@ Defines @tool-decorated functions that the ReAct agent autonomously selects and 
 """
 
 import os
-import json
+import time
 import requests
 from langchain_core.tools import tool
 
@@ -60,39 +60,61 @@ def _fetch_via_newsapi(category: str, query: str = "") -> list[dict]:
     return articles
 
 
-def _fetch_via_duckduckgo(query: str) -> list[dict]:
-    """Fetch results via DuckDuckGo (no API key needed)."""
+def _get_ddgs():
+    """Return a DDGS instance, preferring the new 'ddgs' package over the renamed 'duckduckgo_search'."""
     try:
+        from ddgs import DDGS
+        return DDGS
+    except ImportError:
         from duckduckgo_search import DDGS
-        results = []
-        with DDGS() as ddgs:
-            for r in ddgs.news(query, max_results=5):
-                results.append({
-                    "title": r.get("title", "No title"),
-                    "source": r.get("source", "DuckDuckGo"),
-                    "description": r.get("body", ""),
-                    "url": r.get("url", ""),
-                })
-        return results
-    except Exception:
-        return []
+        return DDGS
+
+
+def _fetch_via_duckduckgo(query: str) -> list[dict]:
+    """Fetch news results via DuckDuckGo with retry on rate-limit."""
+    DDGS = _get_ddgs()
+    for attempt in range(3):
+        try:
+            results = []
+            with DDGS() as ddgs:
+                for r in ddgs.news(query, max_results=5):
+                    results.append({
+                        "title": r.get("title", "No title"),
+                        "source": r.get("source", "DuckDuckGo"),
+                        "description": r.get("body", ""),
+                        "url": r.get("url", ""),
+                    })
+            if results:
+                return results
+        except Exception as e:
+            if "ratelimit" in str(e).lower() and attempt < 2:
+                time.sleep(2 + attempt * 2)
+                continue
+            break
+    return []
 
 
 def _fetch_ddg_text(query: str) -> list[dict]:
-    """Fetch web text results via DuckDuckGo."""
-    try:
-        from duckduckgo_search import DDGS
-        results = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=5):
-                results.append({
-                    "title": r.get("title", ""),
-                    "body": r.get("body", ""),
-                    "href": r.get("href", ""),
-                })
-        return results
-    except Exception:
-        return []
+    """Fetch web text results via DuckDuckGo with retry on rate-limit."""
+    DDGS = _get_ddgs()
+    for attempt in range(3):
+        try:
+            results = []
+            with DDGS() as ddgs:
+                for r in ddgs.text(query, max_results=5):
+                    results.append({
+                        "title": r.get("title", ""),
+                        "body": r.get("body", ""),
+                        "href": r.get("href", ""),
+                    })
+            if results:
+                return results
+        except Exception as e:
+            if "ratelimit" in str(e).lower() and attempt < 2:
+                time.sleep(2 + attempt * 2)
+                continue
+            break
+    return []
 
 
 def _format_articles(articles: list[dict]) -> str:
