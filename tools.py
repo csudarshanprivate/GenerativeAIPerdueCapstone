@@ -256,3 +256,100 @@ def get_news_categories() -> str:
         lines.append(f"- **{cat.capitalize()}**: {desc}")
     lines.append("\nYou can ask for news in any of these categories!")
     return "\n".join(lines)
+
+
+@tool
+def get_weather(location: str) -> str:
+    """
+    Get the current weather and today's forecast for any city or location.
+
+    Use this tool when the user asks about weather, temperature, rain, or forecast.
+
+    Examples:
+    - "What's the weather in New York?" → location="New York"
+    - "Is it raining in London?"        → location="London"
+    - "Weather in Tokyo today"          → location="Tokyo"
+    """
+    try:
+        # Step 1: Geocode the location name → lat/lon using Open-Meteo geocoding API (no key needed)
+        geo_url = "https://geocoding-api.open-meteo.com/v1/search"
+        geo_resp = requests.get(geo_url, params={"name": location, "count": 1}, timeout=10)
+        geo_data = geo_resp.json()
+
+        if not geo_data.get("results"):
+            return f"Could not find location '{location}'. Please try a more specific city name."
+
+        result = geo_data["results"][0]
+        lat = result["latitude"]
+        lon = result["longitude"]
+        city = result.get("name", location)
+        country = result.get("country", "")
+
+        # Step 2: Fetch current weather + daily forecast from Open-Meteo (no key needed)
+        weather_url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": ["temperature_2m", "relative_humidity_2m", "wind_speed_10m",
+                        "weather_code", "apparent_temperature"],
+            "daily": ["temperature_2m_max", "temperature_2m_min", "precipitation_sum",
+                      "weather_code"],
+            "timezone": "auto",
+            "forecast_days": 3,
+        }
+        w_resp = requests.get(weather_url, params=params, timeout=10)
+        w = w_resp.json()
+
+        current = w.get("current", {})
+        daily = w.get("daily", {})
+
+        # WMO weather code → description mapping
+        WMO = {
+            0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+            45: "Foggy", 48: "Icy fog", 51: "Light drizzle", 53: "Drizzle",
+            61: "Light rain", 63: "Rain", 65: "Heavy rain",
+            71: "Light snow", 73: "Snow", 75: "Heavy snow",
+            80: "Rain showers", 81: "Rain showers", 82: "Violent rain showers",
+            95: "Thunderstorm", 96: "Thunderstorm with hail",
+        }
+        code = current.get("weather_code", 0)
+        condition = WMO.get(code, f"Code {code}")
+
+        temp = current.get("temperature_2m", "N/A")
+        feels = current.get("apparent_temperature", "N/A")
+        humidity = current.get("relative_humidity_2m", "N/A")
+        wind = current.get("wind_speed_10m", "N/A")
+        units = w.get("current_units", {})
+        t_unit = units.get("temperature_2m", "°C")
+
+        lines = [
+            f"## Weather in {city}, {country}\n",
+            f"**Condition:** {condition}",
+            f"**Temperature:** {temp}{t_unit} (feels like {feels}{t_unit})",
+            f"**Humidity:** {humidity}%",
+            f"**Wind Speed:** {wind} km/h",
+            "",
+            "**3-Day Forecast:**",
+        ]
+
+        dates = daily.get("time", [])
+        max_temps = daily.get("temperature_2m_max", [])
+        min_temps = daily.get("temperature_2m_min", [])
+        precip = daily.get("precipitation_sum", [])
+        d_codes = daily.get("weather_code", [])
+
+        for i in range(min(3, len(dates))):
+            day_cond = WMO.get(d_codes[i] if i < len(d_codes) else 0, "")
+            rain = precip[i] if i < len(precip) else 0
+            lines.append(
+                f"- **{dates[i]}**: {day_cond}, "
+                f"High {max_temps[i] if i < len(max_temps) else 'N/A'}{t_unit} / "
+                f"Low {min_temps[i] if i < len(min_temps) else 'N/A'}{t_unit}, "
+                f"Rain {rain}mm"
+            )
+
+        lines.append("\n*Data from Open-Meteo (open-meteo.com)*")
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Could not fetch weather for '{location}': {str(e)}"

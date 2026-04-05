@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 
-from tools import get_top_headlines, search_news, search_web, get_news_categories
+from tools import get_top_headlines, search_news, search_web, get_news_categories, get_weather
 
 load_dotenv()
 
@@ -21,7 +21,8 @@ Your capabilities:
 1. Fetch latest news headlines by category (technology, finance, sports, health, science, entertainment, general)
 2. Search for specific news topics or recent events
 3. Search the web for real-time facts, data, and information
-4. List available news categories
+4. Get current weather and 3-day forecast for any city
+5. List available news categories
 
 How to respond:
 - For news requests (e.g., "latest tech news", "show me sports headlines"), use get_top_headlines with the appropriate category
@@ -36,7 +37,7 @@ Be concise, informative, and helpful. Always use a tool to fetch current informa
 """
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
-TOOLS = [get_top_headlines, search_news, search_web, get_news_categories]
+TOOLS = [get_top_headlines, search_news, search_web, get_weather, get_news_categories]
 
 
 def create_news_agent(checkpointer=None):
