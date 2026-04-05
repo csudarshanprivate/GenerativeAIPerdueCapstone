@@ -21,6 +21,30 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Session state — must be initialised BEFORE sidebar reads it ────────────────
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "thread_id" not in st.session_state:
+    import uuid
+    st.session_state.thread_id = str(uuid.uuid4())
+if "category_clicks" not in st.session_state:
+    st.session_state.category_clicks = {}
+if "pinned_categories" not in st.session_state:
+    st.session_state.pinned_categories = []
+if "active_headline_cat" not in st.session_state:
+    st.session_state.active_headline_cat = None
+
+def record_category_click(cat: str):
+    st.session_state.category_clicks[cat] = st.session_state.category_clicks.get(cat, 0) + 1
+
+def get_preferred_categories(n: int = 3) -> list:
+    """Return top-n categories by click count, pinned ones always first."""
+    pinned = st.session_state.pinned_categories
+    clicks = st.session_state.category_clicks
+    ranked = sorted([c for c in clicks if c not in pinned],
+                    key=lambda c: clicks[c], reverse=True)
+    return (pinned + ranked)[:n]
+
 # ── Sidebar navigation ─────────────────────────────────────────────────────────
 st.sidebar.title("📰 NewsGenie")
 st.sidebar.caption("AI-Powered Agentic News Assistant")
@@ -60,30 +84,6 @@ st.sidebar.markdown(
     "- `get_weather` — weather forecast\n"
     "- `get_news_categories` — list categories"
 )
-
-# ── Session state ──────────────────────────────────────────────────────────────
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "thread_id" not in st.session_state:
-    import uuid
-    st.session_state.thread_id = str(uuid.uuid4())
-
-# Personalisation: track how often each category is accessed
-if "category_clicks" not in st.session_state:
-    st.session_state.category_clicks = {}   # {"Technology": 3, "Sports": 1, ...}
-if "pinned_categories" not in st.session_state:
-    st.session_state.pinned_categories = [] # user-pinned favourites
-
-def record_category_click(cat: str):
-    st.session_state.category_clicks[cat] = st.session_state.category_clicks.get(cat, 0) + 1
-
-def get_preferred_categories(n: int = 3) -> list:
-    """Return top-n categories by click count, pinned ones always first."""
-    pinned = st.session_state.pinned_categories
-    clicks = st.session_state.category_clicks
-    ranked = sorted([c for c in clicks if c not in pinned],
-                    key=lambda c: clicks[c], reverse=True)
-    return (pinned + ranked)[:n]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -163,7 +163,7 @@ elif page == "📊 Quick Headlines":
     st.title("📊 Quick Headlines")
     st.caption("Select a category or view your personalised feed based on your reading preferences.")
 
-    CATEGORIES = ["Technology", "Finance", "Sports", "Health", "Science", "Entertainment", "General"]
+    CATEGORIES = ALL_CATS
     QUERY_MAP  = {
         "technology":    "technology news today",
         "finance":       "finance business news today",
@@ -173,9 +173,6 @@ elif page == "📊 Quick Headlines":
         "entertainment": "entertainment news today",
         "general":       "top news headlines today",
     }
-
-    if "active_headline_cat" not in st.session_state:
-        st.session_state.active_headline_cat = None
 
     # ── Shared fetch helper ────────────────────────────────────────────────────
     def fetch_and_render(category: str, key_prefix: str = ""):
