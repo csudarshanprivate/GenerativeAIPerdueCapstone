@@ -271,19 +271,43 @@ def get_weather(location: str) -> str:
     - "Weather in Tokyo today"          → location="Tokyo"
     """
     try:
-        # Step 1: Geocode the location name → lat/lon using Open-Meteo geocoding API (no key needed)
+        # Step 1: Geocode — Open-Meteo only accepts city names, not full address strings.
+        # Parse "Aurora, Illinois, United States" → city="Aurora", state hint="illinois"
+        parts = [p.strip() for p in location.split(",")]
+        city_name = parts[0]                              # always use first part as city
+        hint = " ".join(parts[1:]).lower() if len(parts) > 1 else ""  # state/country hint
+
         geo_url = "https://geocoding-api.open-meteo.com/v1/search"
-        geo_resp = requests.get(geo_url, params={"name": location, "count": 1}, timeout=10)
+        geo_resp = requests.get(geo_url, params={"name": city_name, "count": 10}, timeout=10)
         geo_data = geo_resp.json()
 
         if not geo_data.get("results"):
-            return f"Could not find location '{location}'. Please try a more specific city name."
+            return f"Could not find location '{location}'. Please try just the city name (e.g. 'Aurora')."
 
-        result = geo_data["results"][0]
+        # Pick the best match: prefer result whose state (admin1) matches the hint.
+        # Check state first (more specific), then country — avoids false matches on "united states".
+        result = geo_data["results"][0]  # default to first
+        if hint:
+            hint_words = [w for w in hint.split() if len(w) > 3]
+            # Pass 1: look for a state-level match
+            for r in geo_data["results"]:
+                state_r = r.get("admin1", "").lower()
+                if any(word in state_r for word in hint_words):
+                    result = r
+                    break
+            else:
+                # Pass 2: fall back to country-level match
+                for r in geo_data["results"]:
+                    country_r = r.get("country", "").lower()
+                    if any(word in country_r for word in hint_words):
+                        result = r
+                        break
         lat = result["latitude"]
         lon = result["longitude"]
-        city = result.get("name", location)
+        city = result.get("name", city_name)
+        state = result.get("admin1", "")
         country = result.get("country", "")
+        display_location = f"{city}, {state}, {country}" if state else f"{city}, {country}"
 
         # Step 2: Fetch current weather + daily forecast from Open-Meteo (no key needed)
         weather_url = "https://api.open-meteo.com/v1/forecast"
@@ -323,7 +347,7 @@ def get_weather(location: str) -> str:
         t_unit = units.get("temperature_2m", "°C")
 
         lines = [
-            f"## Weather in {city}, {country}\n",
+            f"## Weather in {display_location}\n",
             f"**Condition:** {condition}",
             f"**Temperature:** {temp}{t_unit} (feels like {feels}{t_unit})",
             f"**Humidity:** {humidity}%",
