@@ -147,6 +147,25 @@ Open **http://localhost:8501**
 
 ---
 
+## Content Reliability Filter
+
+A key requirement of NewsGenie is filtering out unreliable or misleading content. Every article passes through a reliability scoring layer before being shown to the user.
+
+| Score | Badge | Criteria |
+|---|---|---|
+| Trusted | ✅ Trusted Source | Article from a known reputable outlet (Reuters, BBC, Bloomberg, ESPN, etc.) |
+| Unverified | ❓ Unverified Source | Source not in trusted list — shown but flagged |
+| Flagged | ⚠️ Possible Clickbait | Sensational title patterns detected (e.g. "You won't believe…", "!!!") |
+| Removed | *(filtered out)* | Known misinformation sources (e.g. InfoWars) — dropped entirely |
+
+**How it works:**
+1. Each article's source is matched against a curated trusted-sources list (50+ major outlets)
+2. Article titles are checked against clickbait regex patterns (sensational language, excessive punctuation, listicle bait)
+3. Known unreliable domains are removed before results reach the user
+4. All remaining articles display a reliability badge alongside the source name
+
+---
+
 ## Fallback Mechanisms
 
 | Scenario | Behaviour |
@@ -155,6 +174,7 @@ Open **http://localhost:8501**
 | DuckDuckGo rate-limited | Retries 3 times with backoff |
 | General knowledge question | LLM answers from training data (no tool needed) |
 | Ambiguous city name | Geocoding picks best match by state/country hint |
+| All results flagged as unreliable | Returns informative message, prompts retry |
 
 ---
 
@@ -201,5 +221,6 @@ See **`test_cases.md`** for full details. Summary:
 | LangGraph-based workflow | `create_react_agent` built on LangGraph internals |
 | Fallback mechanisms | DuckDuckGo fallback + rate-limit retry + direct LLM fallback |
 | Streamlit UI with session management | 3-page app with persistent session state |
+| Filter unreliable/misleading content | Reliability filter — trusted-source list + clickbait detection + flagged-domain removal |
 | Automated test cases | 10 tests validating tool selection and response quality |
 | Multi-file architecture | `tools.py` → `agents.py` → `workflow.py` → `streamlit_app.py` |

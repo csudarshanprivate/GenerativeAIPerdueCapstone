@@ -1,15 +1,99 @@
 """
 tools.py — NewsGenie Agent Tools
 Defines @tool-decorated functions that the ReAct agent autonomously selects and calls.
+Includes a content reliability filter that scores and flags misleading/low-quality articles.
 """
 
 import os
+import re
 import time
 import requests
 from langchain_core.tools import tool
 
 # ── Optional: NewsAPI ──────────────────────────────────────────────────────────
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
+
+# ── Content Reliability Filter ─────────────────────────────────────────────────
+# Tier 1 — Trusted: major established news organisations
+TRUSTED_SOURCES = {
+    "reuters", "associated press", "ap news", "bbc", "bbc news", "the guardian",
+    "the new york times", "nytimes", "washington post", "wall street journal", "wsj",
+    "bloomberg", "financial times", "ft", "cnn", "nbc news", "abc news", "cbs news",
+    "npr", "pbs", "the economist", "time", "newsweek", "forbes", "fortune",
+    "techcrunch", "the verge", "wired", "ars technica", "engadget", "zdnet",
+    "espn", "sports illustrated", "sky sports", "bbc sport",
+    "nature", "science", "new scientist", "scientific american",
+    "the sporting news", "yahoo news", "yahoo sports", "mashable",
+    "axios", "politico", "the hill", "usa today", "los angeles times",
+    "chicago tribune", "the atlantic", "new yorker",
+}
+
+# Tier 2 — Flagged: known low-quality / clickbait / misleading domains
+FLAGGED_SOURCES = {
+    "infowars", "natural news", "beforeitsnews", "worldnewsdailyreport",
+    "empirenews", "abcnews.com.co", "nationalreport", "theonion",
+    "clickhole", "babylonbee",   # satire — fine but should be labelled
+    "topbuzz", "viralnova",
+}
+
+# Clickbait / sensational patterns in titles
+CLICKBAIT_PATTERNS = [
+    r"\byou won't believe\b",
+    r"\bshocking\b",
+    r"\bblown away\b",
+    r"\bsecret.{0,20}they don't want\b",
+    r"\bdoctors hate\b",
+    r"\bone weird trick\b",
+    r"\bthis will change everything\b",
+    r"\bmust see\b",
+    r"^\d+ (things|reasons|ways|facts|secrets)",   # "10 things you..."
+    r"\bOMG\b",
+    r"!!!",
+]
+
+
+def _reliability_score(article: dict) -> tuple[int, str]:
+    """
+    Score an article's reliability: 0=unknown, 1=flagged, 2=trusted.
+    Returns (score, label).
+    """
+    source = article.get("source", "").lower().strip()
+    title  = article.get("title", "").lower()
+    desc   = article.get("description", "").lower()
+
+    # Flagged source
+    if any(f in source for f in FLAGGED_SOURCES):
+        return 1, "⚠️ Flagged Source"
+
+    # Check clickbait patterns in title
+    for pattern in CLICKBAIT_PATTERNS:
+        if re.search(pattern, title, re.IGNORECASE):
+            return 1, "⚠️ Possible Clickbait"
+
+    # No title or very short — low quality signal
+    if not title or len(title) < 10:
+        return 0, "❓ Unknown"
+
+    # Trusted source
+    if any(t in source for t in TRUSTED_SOURCES):
+        return 2, "✅ Trusted Source"
+
+    return 0, "❓ Unverified Source"
+
+
+def _filter_and_score(articles: list[dict], remove_flagged: bool = True) -> list[dict]:
+    """
+    Filter out flagged/low-quality articles and annotate remaining ones with reliability badge.
+    """
+    scored = []
+    for art in articles:
+        score, label = _reliability_score(art)
+        if remove_flagged and score == 1:
+            continue  # drop flagged articles entirely
+        art["reliability_score"] = score
+        art["reliability_label"] = label
+        scored.append(art)
+    return scored
 
 CATEGORY_ALIASES = {
     "tech": "technology", "ai": "technology", "artificial intelligence": "technology",
@@ -122,8 +206,12 @@ def _format_articles(articles: list[dict]) -> str:
         return "No articles found."
     lines = []
     for i, art in enumerate(articles, 1):
+        reliability = art.get("reliability_label", "")
+        source_line = art.get("source", "Unknown")
+        if reliability:
+            source_line = f"{source_line}  {reliability}"
         lines.append(f"{i}. **{art['title']}**")
-        lines.append(f"   Source: {art.get('source', 'Unknown')}")
+        lines.append(f"   Source: {source_line}")
         if art.get("description"):
             lines.append(f"   {art['description'][:150]}...")
         if art.get("url"):
@@ -171,6 +259,11 @@ def get_top_headlines(category: str = "general") -> str:
     if not articles:
         return f"Could not fetch {cat} news at this time. Please try again."
 
+    # Filter unreliable/misleading content; annotate remaining with reliability badges
+    articles = _filter_and_score(articles)
+    if not articles:
+        return f"All fetched {cat} articles were filtered as unreliable. Please try again shortly."
+
     return f"## Top {cat.capitalize()} Headlines\n\n" + _format_articles(articles)
 
 
@@ -200,6 +293,11 @@ def search_news(query: str) -> str:
 
     if not articles:
         return f"No news found for '{query}'. Try a different search term."
+
+    # Filter unreliable/misleading content; annotate remaining with reliability badges
+    articles = _filter_and_score(articles)
+    if not articles:
+        return f"All results for '{query}' were filtered as unreliable. Try a more specific query."
 
     return f"## News Results: {query}\n\n" + _format_articles(articles)
 
